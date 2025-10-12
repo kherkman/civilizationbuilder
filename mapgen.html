@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High Resolution Elevation Map Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the map to ensure good visibility and centering */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+        }
+        #mapCanvas {
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            background-color: #ffffff;
+            /* Increased max-width for the 800x800 canvas */
+            max-width: 95vw; 
+            max-height: 90vh;
+            cursor: crosshair; /* Default cursor for placement mode */
+            touch-action: none; /* Allows us to selectively control touch actions via JS */
+        }
+        /* Custom button styling */
+        .gen-button {
+            transition: all 0.15s ease-in-out;
+            background: linear-gradient(145deg, #10b981, #059669);
+            border: none;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .gen-button:hover {
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+            transform: translateY(-1px);
+            background: linear-gradient(145deg, #059669, #10b981);
+        }
+        .gen-button:active {
+            transform: translateY(1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="p-4 flex flex-col items-center justify-center min-h-screen">
+
+    <div class="max-w-4xl w-full">
+        <!-- Title and Description -->
+        <h1 class="text-3xl font-extrabold text-gray-800 mb-2 text-center">Procedural Map Generator (High Res)</h1>
+        <p class="text-sm text-gray-500 mb-6 text-center">
+            Enter a place name below, and then click on the map to place it! (Existing names can be **dragged** and **clicked to edit**.)
+        </p>
+
+        <!-- Map Container -->
+        <div class="flex justify-center mb-6">
+            <canvas id="mapCanvas" width="800" height="800" class="w-full h-auto max-w-[800px] border border-gray-200"></canvas>
+        </div>
+
+        <!-- Controls -->
+        <div class="p-4 bg-white rounded-xl shadow-md space-y-4">
+            
+            <!-- Smoothing Slider -->
+            <div class="flex flex-col">
+                <label for="smoothingSlider" class="text-sm font-medium text-gray-700 flex justify-between">
+                    Smoothing Iterations: <span id="smoothingValue">500</span>
+                </label>
+                <input type="range" id="smoothingSlider" min="10" max="1000" value="500" step="10" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+            </div>
+
+            <!-- Ruggedness Slider -->
+            <div class="flex flex-col">
+                <label for="ruggednessSlider" class="text-sm font-medium text-gray-700 flex justify-between">
+                    Terrain Ruggedness (Variation): <span id="ruggednessValue">1.0</span>
+                </label>
+                <input type="range" id="ruggednessSlider" min="0.1" max="2.0" value="1.0" step="0.1" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+            </div>
+
+            <!-- Place New Name Controls -->
+            <div class="space-y-3 border-t pt-4">
+                <h3 class="font-bold text-gray-700">Place New Name Settings (Bold by default)</h3>
+                
+                <div>
+                    <label for="placeNameInput" class="text-sm font-medium text-gray-500 block">Name to Place</label>
+                    <input type="text" id="placeNameInput" placeholder="Enter city or feature name..." class="w-full p-2 border rounded-md text-sm">
+                </div>
+
+                <div class="flex space-x-3">
+                    <div class="flex-1">
+                        <label for="fontSizeInput" class="text-xs font-medium text-gray-500 block">Font Size (px)</label>
+                        <input type="number" id="fontSizeInput" value="24" min="8" max="48" class="w-full p-2 border rounded-md text-sm">
+                    </div>
+                    <div class="flex-1">
+                        <label for="fontFamilyInput" class="text-xs font-medium text-gray-500 block">Font Family</label>
+                        <select id="fontFamilyInput" class="w-full p-2 border rounded-md text-sm">
+                            <option value="Inter, sans-serif">Inter (Default)</option>
+                            <option value="serif">Serif (Classic)</option>
+                            <option value="monospace">Monospace (Code)</option>
+                            <option value="cursive">Cursive (Script)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <button id="insertNameButton" class="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-xl transition-colors shadow-lg">
+                    Click Map to Place Name
+                </button>
+            </div>
+            
+            <!-- New: Manage Selected Name Controls -->
+            <div id="manageNameControls" class="space-y-3 border-t pt-4 hidden">
+                <h3 class="font-bold text-gray-700 text-yellow-600">Selected Name: <span id="selectedNameText" class="font-mono"></span></h3>
+
+                <div>
+                    <label for="editNameInput" class="text-sm font-medium text-gray-500 block">Edit Name Text (Updates automatically)</label>
+                    <input type="text" id="editNameInput" class="w-full p-2 border rounded-md text-sm" value="">
+                </div>
+                
+                <button id="deleteNameButton" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-xl transition-colors shadow-lg">
+                    Delete Selected Name
+                </button>
+            </div>
+
+
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3 border-t pt-4">
+                <!-- Generate Button -->
+                <button id="generateButton" class="gen-button text-white font-bold py-3 px-6 rounded-xl shadow-lg flex-grow">
+                    Generate New Map
+                </button>
+
+                <!-- Toggle Contours Button -->
+                <button id="toggleContours" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg flex-shrink-0 transition-colors">
+                    Hide Contours
+                </button>
+            </div>
+            
+            <!-- New: Save/Load Buttons -->
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <button id="saveButton" class="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg flex-grow transition-colors">
+                    Save Map Data (.map)
+                </button>
+                <button id="loadButton" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg flex-grow transition-colors">
+                    Load Map Data (.map)
+                </button>
+                <input type="file" id="fileInput" accept=".map, .json" class="hidden">
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const canvas = document.getElementById('mapCanvas');
+            const ctx = canvas.getContext('2d');
+            const generateButton = document.getElementById('generateButton');
+            const smoothingSlider = document.getElementById('smoothingSlider');
+            const smoothingValueSpan = document.getElementById('smoothingValue');
+            const ruggednessSlider = document.getElementById('ruggednessSlider');
+            const ruggednessValueSpan = document.getElementById('ruggednessValue');
+            const toggleContoursButton = document.getElementById('toggleContours');
+            const saveButton = document.getElementById('saveButton');
+            const loadButton = document.getElementById('loadButton');
+            const fileInput = document.getElementById('fileInput');
+            
+            // New Name Controls
+            const fontSizeInput = document.getElementById('fontSizeInput');
+            const fontFamilyInput = document.getElementById('fontFamilyInput');
+            const placeNameInput = document.getElementById('placeNameInput');
+            const insertNameButton = document.getElementById('insertNameButton');
+            
+            // Edit Name Controls
+            const manageNameControls = document.getElementById('manageNameControls');
+            const selectedNameText = document.getElementById('selectedNameText');
+            const editNameInput = document.getElementById('editNameInput');
+            const deleteNameButton = document.getElementById('deleteNameButton');
+
+
+            // --- Configuration Constants ---
+            const MAP_SIZE = 256; 
+            const CANVAS_SIZE = 800; 
+
+            // State management
+            let currentMapData = null;
+            let shouldDrawContours = true; 
+            let placeNames = []; 
+            let selectedNameIndex = -1; // Index of the currently selected name for editing
+
+            // Drag state for moving place names
+            let isDragging = false;
+            let draggedName = null;
+            let dragOffsetX = 0;
+            let dragOffsetY = 0;
+            let initialTouchPoint = null; // Store initial touch for drag vs click determination
+
+
+            /**
+             * Generates a 2D array of normalized elevation data [0, 1]. (Omitted generation logic for brevity)
+             */
+            function generateMapData(size, iterations, ruggedness) {
+                let data = Array.from({ length: size }, () =>
+                    Array.from({ length: size }, () => (Math.random() * 2 - 1) * ruggedness)
+                );
+                for (let k = 0; k < iterations; k++) {
+                    let newData = data.map(row => [...row]);
+                    for (let y = 0; y < size; y++) {
+                        for (let x = 0; x < size; x++) {
+                            let sum = data[y][x];
+                            let count = 1;
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    if (dx === 0 && dy === 0) continue;
+                                    const nx = (x + dx + size) % size;
+                                    const ny = (y + dy + size) % size;
+                                    sum += data[ny][nx];
+                                    count++;
+                                }
+                            }
+                            newData[y][x] = sum / count;
+                        }
+                    }
+                    data = newData;
+                }
+                let minVal = Infinity, maxVal = -Infinity;
+                data.forEach(row => { row.forEach(val => { if (val < minVal) minVal = val; if (val > maxVal) maxVal = val; }); });
+                const range = maxVal - minVal;
+                const effectiveRange = range === 0 ? 1 : range; 
+                data = data.map(row => row.map(val => (val - minVal) / effectiveRange));
+                return data;
+            }
+
+            /**
+             * Determines the terrain color based on the normalized elevation value.
+             */
+            function getColor(elevation) {
+                if (elevation < 0.20) return 'hsl(210, 80%, 35%)';
+                if (elevation < 0.35) return 'hsl(210, 70%, 55%)';
+                if (elevation < 0.45) return 'hsl(40, 60%, 85%)';
+                if (elevation < 0.60) return 'hsl(100, 50%, 40%)';
+                if (elevation < 0.75) return 'hsl(80, 40%, 45%)';
+                if (elevation < 0.90) return 'hsl(30, 30%, 50%)';
+                return 'hsl(0, 0%, 95%)';
+            }
+
+            /**
+             * Draws the map onto the canvas, including terrain color, contours, and place names.
+             */
+            function drawMap(ctx, mapData, canvasSize, drawContours) {
+                const size = mapData.length;
+                const cellSize = canvasSize / size; 
+
+                ctx.clearRect(0, 0, canvasSize, canvasSize);
+
+                // 1. Draw the base terrain color
+                for (let y = 0; y < size; y++) {
+                    for (let x = 0; x < size; x++) {
+                        const elevation = mapData[y][x];
+                        ctx.fillStyle = getColor(elevation);
+                        ctx.fillRect(x * cellSize, y * cellSize, cellSize + 0.5, cellSize + 0.5);
+                    }
+                }
+
+                // 2. Draw Elevation Lines (Contours)
+                if (drawContours) {
+                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+                    ctx.lineWidth = 1;
+                    const thresholds = [0.2, 0.4, 0.6, 0.8];
+                    thresholds.forEach(threshold => {
+                        ctx.beginPath();
+                        // Marching squares logic omitted for brevity, but retained for functionality
+                        for (let y = 0; y < size - 1; y++) {
+                            for (let x = 0; x < size - 1; x++) {
+                                const tl = mapData[y][x] > threshold;
+                                const tr = mapData[y][x + 1] > threshold;
+                                const bl = mapData[y + 1][x] > threshold;
+                                const br = mapData[y + 1][x + 1] > threshold;
+                                const config = (tl << 3) | (tr << 2) | (br << 1) | bl;
+
+                                const t = { x: x * cellSize + cellSize / 2, y: y * cellSize };
+                                const r = { x: (x + 1) * cellSize, y: y * cellSize + cellSize / 2 };
+                                const b = { x: x * cellSize + cellSize / 2, y: (y + 1) * cellSize };
+                                const l = { x: x * cellSize, y: y * cellSize + cellSize / 2 };
+
+                                switch (config) {
+                                    case 1: case 14: ctx.moveTo(l.x, l.y); ctx.lineTo(b.x, b.y); break;
+                                    case 2: case 13: ctx.moveTo(b.x, b.y); ctx.lineTo(r.x, r.y); break;
+                                    case 3: case 12: ctx.moveTo(l.x, l.y); ctx.lineTo(r.x, r.y); break;
+                                    case 4: case 11: ctx.moveTo(r.x, r.y); ctx.lineTo(t.x, t.y); break;
+                                    case 5: // Ambiguous
+                                        ctx.moveTo(l.x, l.y); ctx.lineTo(t.x, t.y);
+                                        ctx.moveTo(b.x, b.y); ctx.lineTo(r.x, r.y); break;
+                                    case 6: case 9: ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); break;
+                                    case 7: case 8: ctx.moveTo(l.x, l.y); ctx.lineTo(t.x, t.y); break;
+                                    case 10: // Ambiguous
+                                        ctx.moveTo(r.x, r.y); ctx.lineTo(t.x, t.y);
+                                        ctx.moveTo(l.x, l.y); ctx.lineTo(b.x, b.y); break;
+                                }
+                            }
+                        }
+                        ctx.stroke();
+                    });
+                }
+
+                // 3. Draw Place Names
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                placeNames.forEach((place, index) => {
+                    // Draw selection highlight first
+                    if (index === selectedNameIndex) {
+                        ctx.beginPath();
+                        ctx.arc(place.x, place.y - 5, 5, 0, Math.PI * 2); 
+                        ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+                        ctx.fill();
+                    }
+
+                    // Draw text
+                    ctx.font = `bold ${place.size} ${place.font}`; 
+                    ctx.fillStyle = place.color || '#2d3748'; 
+                    ctx.fillText(place.text, place.x, place.y - 5); 
+                });
+            }
+
+            /**
+             * Checks if the given coordinates hit a place name label.
+             */
+            function hitTest(px, py) {
+                // Check hit boxes for all place names, from last (top-most) to first
+                for (let i = placeNames.length - 1; i >= 0; i--) {
+                    const place = placeNames[i];
+                    
+                    // Temporarily set font to measure size (using the bold style)
+                    ctx.font = `bold ${place.size} ${place.font}`;
+                    const metrics = ctx.measureText(place.text);
+                    
+                    // Simple bounding box approximation
+                    const width = metrics.width;
+                    const height = parseInt(place.size, 10) * 1.2; 
+                    
+                    // Define the bounding box relative to the text alignment ('center', 'bottom')
+                    const xStart = place.x - width / 2;
+                    const xEnd = place.x + width / 2;
+                    const yStart = place.y - height;
+                    const yEnd = place.y + 5; // Allow a little padding below the baseline
+                    
+                    if (px >= xStart && px <= xEnd && py >= yStart && py <= yEnd) {
+                        return { place, index: i };
+                    }
+                }
+                return null;
+            }
+
+            /**
+             * Updates the dedicated panel for editing the currently selected name.
+             */
+            function updateEditPanel(index) {
+                if (index >= 0) {
+                    const place = placeNames[index];
+                    selectedNameText.textContent = place.text;
+                    editNameInput.value = place.text;
+                    manageNameControls.classList.remove('hidden');
+                } else {
+                    manageNameControls.classList.add('hidden');
+                }
+            }
+
+            /**
+             * Handles mouse down (or touch start) event for either dragging, selecting, or placing.
+             */
+            function handleMouseDown(event) {
+                const clientX = event.clientX || (event.touches ? event.touches[0].clientX : event.clientX);
+                const clientY = event.clientY || (event.touches ? event.touches[0].clientY : event.clientY);
+                
+                // Store initial touch point for drag vs click detection on touch devices
+                if (event.touches) {
+                    initialTouchPoint = { x: clientX, y: clientY };
+                }
+
+                const rect = canvas.getBoundingClientRect();
+                const x = clientX - rect.left;
+                const y = clientY - rect.top;
+
+                const hit = hitTest(x, y);
+
+                // 1. Check for Drag Operation start
+                if (hit) {
+                    draggedName = hit.place;
+                    isDragging = true;
+                    selectedNameIndex = hit.index; // Select on mousedown too
+                    updateEditPanel(selectedNameIndex);
+                    redrawCurrentMap(); // Redraw to show selection dot
+
+                    // Calculate offset from click to baseline point
+                    dragOffsetX = x - draggedName.x;
+                    dragOffsetY = y - draggedName.y;
+                    canvas.style.cursor = 'grabbing';
+                    if (event.cancelable) event.preventDefault(); // Prevent scroll if drag starts
+                    return; 
+                }
+                
+                // 2. If no drag, check for placement/unselect
+                const name = placeNameInput.value.trim();
+
+                if (name) {
+                    // Placement Mode
+                    if (event.cancelable) event.preventDefault();
+                    
+                    const fontSize = fontSizeInput.value + 'px';
+                    const fontFamily = fontFamilyInput.value;
+                    
+                    placeNames.push({
+                        text: name,
+                        x: x, 
+                        y: y,
+                        size: fontSize,
+                        font: fontFamily,
+                        color: '#2d3748' 
+                    });
+
+                    // Select the newly placed name
+                    selectedNameIndex = placeNames.length - 1;
+                    updateEditPanel(selectedNameIndex);
+
+                    placeNameInput.value = '';
+                } else {
+                    // Nothing to place, so we unselect the current name
+                    selectedNameIndex = -1;
+                    updateEditPanel(selectedNameIndex);
+                    // Do NOT preventDefault here to allow scrolling unless a name was hit for drag (handled above).
+                }
+
+                redrawCurrentMap();
+            }
+
+            /**
+             * Handles mouse move (or touch move) event for dragging a label.
+             */
+            function handleMouseMove(event) {
+                if (!isDragging || !draggedName) return;
+                
+                const clientX = event.clientX || (event.touches ? event.touches[0].clientX : event.clientX);
+                const clientY = event.clientY || (event.touches ? event.touches[0].clientY : event.clientY);
+                
+                const rect = canvas.getBoundingClientRect();
+                const x = clientX - rect.left;
+                const y = clientY - rect.top;
+
+                // Update the position based on mouse position minus the initial offset
+                draggedName.x = x - dragOffsetX;
+                draggedName.y = y - dragOffsetY;
+                
+                // Prevent page scrolling while actively dragging
+                if (event.cancelable) event.preventDefault();
+
+                redrawCurrentMap();
+            }
+
+            /**
+             * Handles mouse up (or touch end) event to stop dragging.
+             */
+            function handleMouseUp() {
+                isDragging = false;
+                draggedName = null;
+                initialTouchPoint = null;
+                canvas.style.cursor = 'crosshair';
+            }
+
+
+            /**
+             * Saves the current map data and settings to a downloadable JSON file. 
+             */
+            function saveMap() {
+                if (!currentMapData) {
+                    console.error("No map data to save.");
+                    return;
+                }
+
+                const mapDataToSave = {
+                    smoothingIterations: parseInt(smoothingSlider.value, 10),
+                    ruggedness: parseFloat(ruggednessSlider.value),
+                    drawContours: shouldDrawContours,
+                    elevationData: currentMapData,
+                    placeNames: placeNames,
+                    mapSize: MAP_SIZE,
+                    canvasSize: CANVAS_SIZE,
+                    version: 1.2 
+                };
+
+                const json = JSON.stringify(mapDataToSave, null, 2);
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `map_generator_${Date.now()}.map`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+
+            /**
+             * Handles the file selection and loads map data from the file. 
+             */
+            function handleFileSelect(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const loadedData = JSON.parse(e.target.result);
+                        if (!loadedData.elevationData) {
+                            console.error("Invalid map file structure: Missing elevationData.");
+                            return;
+                        }
+                        
+                        currentMapData = loadedData.elevationData;
+                        placeNames = loadedData.placeNames || [];
+                        shouldDrawContours = loadedData.drawContours !== undefined ? loadedData.drawContours : true;
+                        selectedNameIndex = -1; // Clear selection on load
+                        updateEditPanel(selectedNameIndex);
+                        
+                        const { smoothingIterations, ruggedness } = loadedData;
+                        if (smoothingIterations !== undefined) {
+                            smoothingSlider.value = smoothingIterations;
+                            smoothingValueSpan.textContent = smoothingIterations;
+                        }
+                        if (ruggedness !== undefined) {
+                            ruggednessSlider.value = ruggedness;
+                            ruggednessValueSpan.textContent = ruggedness;
+                        }
+
+                        toggleContoursButton.textContent = shouldDrawContours ? "Hide Contours" : "Show Contours";
+                        redrawCurrentMap();
+                        event.target.value = '';
+
+                    } catch (error) {
+                        console.error("Error loading or parsing map file:", error);
+                        // Using canvas to display error message instead of alert
+                        ctx.fillStyle = 'red';
+                        ctx.font = '16px Inter';
+                        ctx.fillText('Error loading file. Check console.', CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+                    }
+                };
+                reader.readAsText(file);
+            }
+
+            /**
+             * Generates new map data and draws it. 
+             */
+            function generateNewAndDraw() {
+                const iterations = parseInt(smoothingSlider.value, 10);
+                const ruggedness = parseFloat(ruggednessSlider.value);
+                
+                generateButton.textContent = "Generating...";
+                generateButton.disabled = true;
+                placeNames = []; // Clear labels on new generation
+                selectedNameIndex = -1; // Clear selection on new generation
+                updateEditPanel(selectedNameIndex);
+
+                setTimeout(() => {
+                    try {
+                        currentMapData = generateMapData(MAP_SIZE, iterations, ruggedness);
+                        drawMap(ctx, currentMapData, CANVAS_SIZE, shouldDrawContours);
+                    } catch (error) {
+                        console.error("Map generation failed:", error);
+                        ctx.fillStyle = 'red';
+                        ctx.font = '16px Inter';
+                        ctx.fillText('Generation Error. Check console.', 10, 30);
+                    } finally {
+                        generateButton.textContent = "Generate New Map";
+                        generateButton.disabled = false;
+                    }
+                }, 50);
+            }
+            
+            /**
+             * Redraws the current map data. 
+             */
+            function redrawCurrentMap() {
+                if (currentMapData) {
+                    drawMap(ctx, currentMapData, CANVAS_SIZE, shouldDrawContours);
+                }
+            }
+
+            // --- Event Listeners ---
+
+            // Mouse Events for Placement/Dragging/Selection
+            canvas.addEventListener('mousedown', handleMouseDown);
+            document.addEventListener('mousemove', handleMouseMove); 
+            document.addEventListener('mouseup', handleMouseUp); 
+
+            // Touch Events for Mobile Dragging and better scrolling robustness
+            canvas.addEventListener('touchstart', (e) => {
+                // Do NOT preventDefault here. handleMouseDown will do it conditionally if drag/placement is intended.
+                if (e.touches.length === 1) handleMouseDown(e);
+            }, { passive: false });
+
+            document.addEventListener('touchmove', (e) => {
+                // Only prevent default and handle move if a drag operation is *in progress*
+                if (isDragging && e.touches.length === 1) {
+                    e.preventDefault(); 
+                    handleMouseMove(e);
+                }
+            }, { passive: false });
+
+            document.addEventListener('touchend', handleMouseUp);
+
+
+            // Edit Name Text Listener (Updates text as user types)
+            editNameInput.addEventListener('input', () => {
+                if (selectedNameIndex >= 0) {
+                    placeNames[selectedNameIndex].text = editNameInput.value;
+                    selectedNameText.textContent = editNameInput.value;
+                    redrawCurrentMap();
+                }
+            });
+
+            // Delete Button Listener
+            deleteNameButton.addEventListener('click', () => {
+                if (selectedNameIndex >= 0) {
+                    placeNames.splice(selectedNameIndex, 1);
+                    selectedNameIndex = -1;
+                    updateEditPanel(selectedNameIndex);
+                    redrawCurrentMap();
+                }
+            });
+
+            // General Controls
+            generateButton.addEventListener('click', generateNewAndDraw);
+            toggleContoursButton.addEventListener('click', () => {
+                shouldDrawContours = !shouldDrawContours;
+                toggleContoursButton.textContent = shouldDrawContours ? "Hide Contours" : "Show Contours";
+                redrawCurrentMap();
+            });
+
+            // Sliders
+            smoothingSlider.addEventListener('input', () => { smoothingValueSpan.textContent = smoothingSlider.value; });
+            ruggednessSlider.addEventListener('input', () => { ruggednessValueSpan.textContent = ruggednessSlider.value; });
+            
+            // Focus input when 'insert' button is clicked
+            insertNameButton.addEventListener('click', () => {
+                placeNameInput.focus();
+            });
+
+            // Save/Load
+            saveButton.addEventListener('click', saveMap);
+            loadButton.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', handleFileSelect);
+
+            // Initial map generation on load
+            generateNewAndDraw();
+        });
+    </script>
+</body>
+</html>

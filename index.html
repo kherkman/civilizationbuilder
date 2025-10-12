@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTS Puzzle</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* These @import rules MUST be at the very top of the stylesheet */
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        /* All other CSS declarations come AFTER the @import rules */
+        /* Base styles for full viewport usage */
+        html, body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Prevent scrollbars from showing */
+            height: 100%;
+            width: 100%;
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* Dark background for overall page */
+            color: #e2e8f0; /* Light text for general UI */
+            display: flex; /* Use flexbox for main layout */
+        }
+        
+        /* Control panel styling - fixed to the left */
+        #controlPanel {
+            flex-shrink: 0; /* Prevent the control panel from shrinking */
+            width: 350px; /* Fixed width for the control panel */
+            height: 100%; /* Full height */
+            background-color: rgba(30, 41, 59, 0.9); /* Darker, slightly transparent background */
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            padding: 1.5rem;
+            display: flex; /* Flex container for internal layout */
+            flex-direction: column;
+            gap: 1rem; /* Space between sections */
+            overflow-y: auto; /* Enable scrolling if content exceeds max-height */
+            z-index: 10; /* Ensure controls are on top */
+        }
+
+        /* Canvas styling - takes up the remaining space on the right */
+        #gameCanvas {
+            flex-grow: 1; /* Take up all available remaining horizontal space */
+            display: block;
+            background-color: #1a202c; /* Fallback background for canvas area */
+            z-index: 1;
+        }
+
+        /* Grouping for categories of buttons */
+        .control-group {
+            border-top: 1px solid rgba(71, 85, 105, 0.5); /* Lighter border */
+            padding-top: 1rem;
+            margin-top: 1rem;
+        }
+        .control-group:first-child {
+            border-top: none;
+            padding-top: 0;
+            margin-top: 0;
+        }
+
+        /* NEW: Collapsible Section Styles */
+        .control-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding: 0.5rem 0;
+            margin-bottom: 0.5rem; 
+        }
+        .control-header h3 {
+            /* Keep original h3 styles but remove conflicting margins */
+            font-size: 1.125rem; /* text-lg */
+            font-weight: bold;
+            color: #e2e8f0; /* Light gray text for headers */
+            margin: 0; /* Remove h3 margin to integrate into flex container */
+            flex-grow: 1;
+        }
+        .control-header:hover h3 {
+            color: #a7f3d0; /* Highlight on hover */
+        }
+        .collapse-icon {
+            transition: transform 0.2s ease;
+            transform: rotate(0deg); /* Expanded state (pointing down) */
+            fill: #e2e8f0;
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+        .control-header.collapsed .collapse-icon {
+            transform: rotate(-90deg); /* Collapsed state (pointing right) */
+        }
+        .control-content.collapsed {
+            display: none;
+        }
+        
+        /* Custom button styling (tweaked for dark background) */
+        .game-button {
+            transition: all 0.15s ease-in-out;
+            background: linear-gradient(145deg, #10b981, #059669); /* Green gradient */
+            border: none;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            color: white;
+            font-weight: bold;
+            padding: 0.5rem 1rem;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            text-align: center;
+        }
+        .game-button:hover {
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+            transform: translateY(-1px);
+            background: linear-gradient(145deg, #059669, #10b981);
+        }
+        .game-button:active {
+            transform: translateY(1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .game-button:disabled {
+            background: #4b5563; /* Gray out disabled buttons */
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        /* Specific color adjustments for spawn buttons */
+        .spawn-button.bg-green-600 { background: #059669; }
+        .spawn-button.bg-green-600:hover { background: #047857; }
+        .spawn-button.bg-blue-600 { background: #2563eb; }
+        .spawn-button.bg-blue-600:hover { background: #1d4ed8; }
+        .spawn-button.bg-yellow-600 { background: #d97706; }
+        .spawn-button.bg-yellow-600:hover { background: #b45309; }
+        .spawn-button.bg-red-600 { background: #dc2626; }
+        .spawn-button.bg-red-600:hover { background: #b91c1c; }
+        .spawn-button.bg-gray-600 { background: #4b5563; }
+        .spawn-button.bg-gray-600:hover { background: #374151; }
+        .spawn-button.bg-purple-600 { background: #7c3aed; }
+        .spawn-button.bg-purple-600:hover { background: #6d28d9; }
+        .spawn-button.bg-sky-600 { background: #0284c7; }
+        .spawn-button.bg-sky-600:hover { background: #0369a1; }
+        .spawn-button.bg-indigo-600 { background: #4f46e5; }
+        .spawn-button.bg-indigo-600:hover { background: #4338ca; }
+        .spawn-button.bg-amber-600 { background: #d97706; }
+        .spawn-button.bg-amber-600:hover { background: #b45309; }
+        .spawn-button.bg-teal-600 { background: #0d9488; }
+        .spawn-button.bg-teal-600:hover { background: #0f766e; }
+        .spawn-button.bg-pink-600 { background: #db2777; }
+        .spawn-button.bg-pink-600:hover { background: #be185d; }
+        
+        /* Display button specific styles */
+        .display-button {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+        .display-button.active {
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+        }
+        .display-icon {
+            font-size: 14px;
+        }
+        .display-label {
+            flex: 1;
+            text-align: left;
+        }
+        
+        /* RTS-style font for titles */
+        .rts-font {
+            font-family: 'Chakra Petch', sans-serif;
+            letter-spacing: 1px;
+            text-shadow: 1px 1px 1px #000;
+            color: #a7f3d0; /* Light green title */
+        }
+        
+        h1.rts-font {
+            font-size: 2.25rem; /* text-3xl */
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        /* Adjusted h3 style for collapsable header integration */
+        /* h3 styles are now mostly within .control-header h3 */
+        p {
+            font-size: 0.875rem; /* text-sm */
+            color: #94a3b8; /* Lighter gray for descriptions */
+        }
+
+        /* Cursor for placement mode */
+        body.placement-mode #gameCanvas {
+            cursor: crosshair;
+        }
+        
+        /* Cursor for remove mode */
+        body.remove-mode #gameCanvas {
+            cursor: not-allowed;
+        }
+        
+        /* Ensure embedded SVG symbols are hidden (no change) */
+        .hidden-svg-definitions {
+            position: absolute;
+            width: 0;
+            height: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        /* Style for the file input wrapper to make it look like a button */
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: block; /* Make it take full width */
+            cursor: pointer;
+            width: 100%;
+        }
+
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Slider styles */
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            background: #4b5563;
+            border-radius: 5px;
+            -webkit-appearance: none;
+            margin-top: 0.5rem;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #a7f3d0; /* Light green thumb */
+            cursor: grab;
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #a7f3d0;
+            cursor: grab;
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
+
+        /* NEW: Keyboard shortcuts section styles */
+        .shortcut-buttons {
+            margin-top: 20px;
+            padding: 15px;
+            background: #1e293b;
+            border-radius: 8px;
+            border: 1px solid #334155;
+        }
+        .shortcut-section h3 {
+            margin: 0 0 12px 0;
+            color: #f1f5f9;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .shortcut-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+        .shortcut-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 8px;
+            background: #334155;
+            border-radius: 4px;
+            border: 1px solid #475569;
+        }
+        .shortcut-key {
+            background: #0f172a;
+            color: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+            min-width: 40px;
+            text-align: center;
+            border: 1px solid #475569;
+        }
+        .shortcut-label {
+            color: #cbd5e1;
+            font-size: 12px;
+            flex: 1;
+        }
+        .remove-mode .shortcut-key[data-key="R"],
+        .placement-mode .shortcut-key[data-key="I"] {
+            background: #dc2626;
+            color: white;
+        }
+
+        /* Active state for remove button */
+        .game-button.active {
+            background: linear-gradient(145deg, #dc2626, #b91c1c);
+            box-shadow: 0 0 10px rgba(220, 38, 38, 0.5);
+        }
+        
+        /* Active state for green/move buttons */
+        #toggleLeftClickMoveModeButton.active {
+            background: linear-gradient(145deg, #a7f3d0, #34d399); /* Greenish-blue light */
+            color: #1a202c;
+            box-shadow: 0 0 10px rgba(167, 243, 208, 0.5);
+        }
+
+        /* Consolidated CSS variables for consistent rendering across SVGs */
+        :root {
+            /* From People.html / existing units */
+            --body-color: #6b8e23;
+            --detail-color: #556b2f;
+            --gear-color: #333333;
+            --highlight-color: #a0c44a;
+            --civilian-body: #6f4e37;
+            --civilian-head: #a3a3a3;
+            --worker-gear: #ffa500;
+            --farmer-gear: #8b4513;
+            --zombie-body: #4CAF50;
+            --zombie-head: #2E7D32;
+            --zombie-wound: #cc0000;
+            --scientist-color: #1e90ff;
+            --police-color: #000080;
+            --doctor-color: #f0f8ff;
+            --chef-color: #ffffff;
+            --pilot-color: #a9a9a9;
+
+            /* From Buildings.html */
+            --military-main: #4a5d3f;
+            --military-detail: #6b8e23;
+            --foundation-color: #333333;
+            --energy-color: #ffff00;
+            --defense-color: #8b0000;
+            --civilian-main-building: #778899;
+            --civilian-detail-building: #b0c4de;
+            --infrastructure-color: #555555;
+
+            /* From Vehicles.html */
+            --track-color: #333333;
+            --vehicle-body-color: #6b8e23; 
+            --vehicle-detail-color: #556b2f; 
+            --vehicle-highlight-color: #a0c44a; 
+            
+            /* From terrain.js (New) */
+            --tree-green: #228b22;
+            --bush-dark: #38761d;
+            --rock-grey: #696969; 
+            --soil-brown: #8b4513;
+            --resource-brown: #964b00; 
+            --crop-yellow: #f1c40f;
+            --flower-red: #c0392b; 
+            --flower-purple: #8a2be2; 
+            --sand-yellow: #f4a460; 
+            --grass-light: #6a9b4e; 
+            --snow-white: #f0f8ff; 
+            --water-blue: #005f9e;
+            --dead-tree-brown: #654321; 
+            --palm-green: #9acd32; 
+            --pine-dark-green: #013220; 
+            --birch-green-light: #b8c47b; 
+            --birch-green-mid: #a0ac68;   
+            --birch-green-dark: #899b50;  
+            --birch-grain-color: #556b2f; 
+            --maple-green-dark: #38761d;  
+            --maple-green-mid: #6aa84f;   
+            --maple-green-light: #9acd32; 
+            --maple-grain-color: #2a5515; 
+            --flower-purple: #8a2be2; 
+            --spruce-darkest: #044a2d; 
+            --spruce-mid: #0f523c;    
+            --spruce-lightest: #1e735b; 
+            --spruce-center: #6c9d5d; 
+            --oak-green-dark: #2f4f2f;  
+            --oak-green-mid: #4f804f;   
+            --oak-green-light: #6aa84f; 
+            --oak-grain-color: #1e361e; 
+            --rock-dark: #444444; 
+            --rock-light: #888888;
+        }
+        
+        /* NEW: Map Generator Modal Styles */
+        #mapGenModal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: none; /* Hidden by default */
+            justify-content: center;
+            align-items: center;
+            z-index: 50; /* Ensure it's on top of everything */
+        }
+
+        #mapGenWindow {
+            background-color: #1e293b;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            width: 80%;
+            height: 80%;
+            position: relative; /* Needed for absolute positioning of close button */
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 2px solid #a7f3d0;
+        }
+
+        #mapGenIframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        #closeMapGenModal {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #dc2626; /* Red */
+            color: white;
+            border: 2px solid #f87171;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            font-size: 18px;
+            font-weight: bold;
+            line-height: 1;
+            cursor: pointer;
+            text-align: center;
+            transition: background-color 0.15s;
+            z-index: 60; 
+        }
+
+        #closeMapGenModal:hover {
+            background: #b91c1c; 
+        }
+        /* END NEW */
+    </style>
+    
+    <!-- Load SVG definitions from external JS files -->
+    <script src="buildings.js"></script> 
+    <script src="people.js"></script>
+    <script src="vehicles.js"></script>
+    <script src="enemies.js"></script> 
+    <script src="terrain.js"></script> <!-- NEW: Load terrain assets -->
+    <script src="animals.js"></script> <!-- NEW: Load animal assets -->
+</head>
+<body>
+
+    <!-- Control Panel - fixed to the left -->
+    <div id="controlPanel" class="control-panel">
+        <h1 class="rts-font">RTS Puzzle</h1>
+        <p class="text-sm text-gray-400">
+            Load a map, then place units/buildings. Left-click to select, Right-click to move units.
+            Use mouse wheel to zoom, click and drag to pan the map.
+        </p>
+        
+        <!-- PLAYER RESOURCES DISPLAY -->
+        <div class="control-group bg-gray-700 p-3 rounded-lg flex justify-between items-center">
+            <h3 class="m-0 text-yellow-300">Player Resources</h3>
+            <span id="coinDisplay" class="text-xl font-bold text-yellow-400 rts-font">5000 Coins</span>
+        </div>
+
+        <!-- NEW: Economic Rates Section -->
+        <div class="control-group" id="economicRatesGroup">
+            <div class="control-header" data-target="economicRatesContent">
+                <h3>Economic Rates</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="economicRatesContent" class="control-content">
+                <div class="flex flex-col gap-2">
+                    <div class="flex justify-between items-center">
+                        <label for="incomeTaxInput" class="text-sm">Income Tax % (Civilian Salary)</label>
+                        <input type="number" id="incomeTaxInput" value="10" min="0" max="100" class="w-20 bg-gray-700 text-gray-100 border border-gray-600 rounded px-2 py-1 text-right">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <label for="vatInput" class="text-sm">VAT % (Civilian Spending)</label>
+                        <input type="number" id="vatInput" value="5" min="0" max="100" class="w-20 bg-gray-700 text-gray-100 border border-gray-600 rounded px-2 py-1 text-right">
+                    </div>
+                    <!-- NEW: Interest Rate Input -->
+                    <div class="flex justify-between items-center">
+                        <label for="interestRateInput" class="text-sm text-red-300">Interest Rate % (Affects Prices NOW, Salaries LATER)</label>
+                        <input type="number" id="interestRateInput" value="0" min="-10" max="20" step="0.5" class="w-20 bg-gray-700 text-gray-100 border border-gray-600 rounded px-2 py-1 text-right">
+                    </div>
+                    <!-- NEW: Inflation Display -->
+                    <div class="flex justify-between items-center pt-2 border-t border-gray-600 mt-2">
+                        <span class="text-sm font-bold">Calculated Inflation:</span>
+                        <span id="inflationDisplay" class="text-sm font-bold text-red-400">0.0%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- NEW: Display Control Buttons -->
+        <div class="control-group" id="displayControlsGroup">
+            <div class="control-header collapsed" data-target="displayControlsContent">
+                <h3>Display Controls</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="displayControlsContent" class="control-content collapsed">
+                <div class="grid grid-cols-2 gap-3">
+                    <button id="toggleTargetLines" class="game-button display-button bg-green-600 active">
+                        <span class="display-icon">🎯</span>
+                        <span class="display-label">Target Lines</span>
+                    </button>
+                    <button id="toggleHealthBars" class="game-button display-button bg-red-600 active">
+                        <span class="display-icon">❤️</span>
+                        <span class="display-label">Health Bars</span>
+                    </button>
+                    <button id="saveTerrainButton" class="game-button display-button bg-blue-600">
+                        <span class="display-icon">💾</span>
+                        <span class="display-label">Save Terrain</span>
+                    </button>
+                    <button id="saveGameButton" class="game-button display-button bg-purple-600">
+                        <span class="display-icon">💾</span>
+                        <span class="display-label">Save Game</span>
+                    </button>
+                    <button id="loadGameButton" class="game-button display-button bg-indigo-600">
+                        <span class="display-icon">📂</span>
+                        <span class="display-label">Load Game</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+            <div class="file-input-wrapper game-button bg-blue-500 hover:bg-blue-600 flex-grow">
+                Load Map Data (.map)
+                <input type="file" id="fileInput" accept=".map, .json">
+            </div>
+            <button id="clearAllButton" class="game-button bg-red-500 hover:bg-red-600 flex-grow">
+                Clear All Entities
+            </button>
+        </div>
+        
+        <!-- NEW: Map Generator Button -->
+        <button id="openMapGenButton" class="game-button bg-amber-600 hover:bg-amber-700 w-full">
+            Open Map Generator
+        </button>
+        <!-- END NEW -->
+
+        <!-- NEW: Quick Action Buttons (Modified) -->
+        <div class="flex flex-col space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+                <button id="quickInsertButton" class="game-button bg-indigo-600 hover:bg-indigo-700">
+                    Quick Insert (I)
+                </button>
+                <button id="cancelActionButton" class="game-button bg-gray-600 hover:bg-gray-700">
+                    Deselect/Cancel (ESC)
+                </button>
+            </div>
+            <!-- New Button for Left-Click Move Mode -->
+            <button id="toggleLeftClickMoveModeButton" class="game-button bg-green-600 hover:bg-green-700">
+                Toggle Left-Click Move (M)
+            </button>
+        </div>
+
+
+        <!-- NEW: Remove Button -->
+        <button id="removeButton" class="game-button bg-orange-600 hover:bg-orange-700">
+            Remove Items (R)
+        </button>
+        
+        <!-- NEW ATTACK CONFIGURATION SECTION -->
+        <div class="control-group" id="attackWaveGroup">
+            <div class="control-header collapsed" data-target="attackWaveContent">
+                <h3>Attack Wave Configuration</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="attackWaveContent" class="control-content collapsed">
+                <p class="text-xs text-gray-500 mb-2">Set the number of enemies to spawn from a random edge and begin the wave.</p>
+                <div class="flex flex-col gap-2">
+                    <div class="flex justify-between items-center">
+                        <label for="zombieCount" class="text-sm">Zombies</label>
+                        <input type="number" id="zombieCount" value="10" min="0" max="100" class="w-20 bg-gray-700 text-gray-100 border border-gray-600 rounded px-2 py-1 text-right">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <label for="crawlerCount" class="text-sm">Crawlers</label>
+                        <input type="number" id="crawlerCount" value="5" min="0" max="100" class="w-20 bg-gray-700 text-gray-100 border border-gray-600 rounded px-2 py-1 text-right">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <label for="raiderCount" class="text-sm">Raiders</label>
+                        <input type="number" id="raiderCount" value="5" min="0" max="100" class="w-20 bg-gray-700 text-gray-100 border border-gray-600 rounded px-2 py-1 text-right">
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- START ATTACK BUTTON -->
+        <button id="startAttackButton" class="game-button bg-purple-700 hover:bg-purple-800 w-full"> 
+            START ATTACK WAVE (Enemies target nearest friendly)
+        </button>
+
+        <!-- NEW: Keyboard Shortcuts Section (Modified) -->
+        <div class="shortcut-buttons" id="shortcutsGroup">
+            <div class="control-header collapsed" data-target="shortcutsContent">
+                <h3>Keyboard Shortcuts</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="shortcutsContent" class="control-content collapsed">
+                <div class="shortcut-section">
+                    <div class="shortcut-grid">
+                        <div class="shortcut-item">
+                            <span class="shortcut-key" data-key="R">R</span>
+                            <span class="shortcut-label">Remove Mode</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key" data-key="I">I</span>
+                            <span class="shortcut-label">Quick Insert</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key" data-key="M">M</span>
+                            <span class="shortcut-label">Toggle Left-Click Move</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key" data-key="ESC">ESC</span>
+                            <span class="shortcut-label">Deselect/Cancel</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key" data-key="DEL">DEL</span>
+                            <span class="shortcut-label">Delete Selected</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-key" data-key="Ctrl">Ctrl+Click</span>
+                            <span class="shortcut-label">Multi-Place</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="control-group" id="zoomGroup">
+            <div class="control-header" data-target="zoomContent">
+                <label for="zoomSlider" class="text-sm font-medium text-gray-200 flex justify-between w-full">
+                    Zoom Level: <span id="zoomValue">5.0x</span>
+                </label>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="zoomContent" class="control-content">
+                <!-- Default values are still 2.0 to 8.0, matching the clamp logic in game.js -->
+                <input type="range" id="zoomSlider" min="2.0" max="8.0" value="5.0" step="0.1" class="w-full">
+            </div>
+        </div>
+
+        <div class="control-group" id="civilianProfessionsGroup">
+            <div class="control-header collapsed" data-target="civilianProfessionsContent">
+                <h3>Civilian & Professions</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="civilianProfessionsContent" class="control-content collapsed">
+                <div class="grid grid-cols-2 gap-3">
+                    <!-- SPEED REDUCED -->
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="unit" data-symbol-id="civilian" data-width="8" data-height="8" data-speed="5" data-color="#6f4e37" data-team="friendly_civilian" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="25">Civilian (25)</button>
+                    <button class="game-button spawn-button bg-yellow-600" data-entity-type="unit" data-symbol-id="construction_worker" data-width="8" data-height="8" data-speed="5" data-color="#6f4e37" data-team="friendly_civilian" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="50">Worker (50)</button>
+                    <button class="game-button spawn-button bg-yellow-600" data-entity-type="unit" data-symbol-id="farmer" data-width="8" data-height="8" data-speed="5" data-color="#6f4e37" data-team="friendly_civilian" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="50">Farmer (50)</button>
+                    <button class="game-button spawn-button bg-sky-600" data-entity-type="unit" data-symbol-id="scientist" data-width="8" data-height="8" data-speed="5" data-color="#1e90ff" data-team="friendly_civilian" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="75">Scientist (75)</button>
+                    <button class="game-button spawn-button bg-indigo-600" data-entity-type="unit" data-symbol-id="police_officer" data-width="8" data-height="8" data-speed="5" data-color="#000080" data-team="friendly_civilian" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="75">Police Officer (75)</button>
+                    <button class="game-button spawn-button bg-sky-600" data-entity-type="unit" data-symbol-id="doctor" data-width="8" data-height="8" data-speed="5" data-color="#f0f8ff" data-team="friendly_civilian" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="75">Doctor (75)</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="unit" data-symbol-id="chef" data-width="8" data-height="8" data-speed="5" data-color="#ffffff" data-team="friendly_civilian" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="50">Chef (50)</button>
+                    <!-- PILOT BUTTON REMOVED FROM HERE -->
+                    <!-- NEW: Cleaner Unit Button -->
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="unit" data-symbol-id="cleaner" data-width="8" data-height="8" data-speed="5" data-color="#ffffff" data-team="friendly_civilian" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="50">Cleaner (50)</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- NEW: Consolidated Buildings Section -->
+        <div class="control-group" id="buildingsInfrastructureGroup">
+            <div class="control-header collapsed" data-target="buildingsInfrastructureContent">
+                <h3>Buildings & Infrastructure</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="buildingsInfrastructureContent" class="control-content collapsed">
+                <p class="text-xs text-gray-500 mb-2">City, Core, and Defense Structures</p>
+                <div class="grid grid-cols-2 gap-3">
+                    
+                    <!-- Civilian & City Buildings -->
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="skyscraper" data-width="35" data-height="35" data-color="#3a4a58" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="800">Skyscraper (800)</button>
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="hospital" data-width="25" data-height="25" data-color="#f0f0f0" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="600">Hospital (600)</button>
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="university" data-width="30" data-height="25" data-color="#cd853f" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="600">University (600)</button>
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="prison" data-width="30" data-height="30" data-color="#404040" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="600">Prison (600)</button>
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="stadium" data-width="40" data-height="35" data-color="#006400" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="1000">Stadium (1000)</button>
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="trade_center" data-width="30" data-height="30" data-color="#555" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="700">Trade Center (700)</button>
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="office" data-width="25" data-height="25" data-color="#778899" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="500">Office (500)</button>
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="grocery_store" data-width="30" data-height="30" data-color="#88b04b" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="400">Grocery Store (400)</button>
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="bar" data-width="25" data-height="25" data-color="#4b0082" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="300" data-max-raw-material="500">Bar (300)</button>
+                    <button class="game-button spawn-button bg-blue-600" data-entity-type="building" data-symbol-id="gym" data-width="25" data-height="25" data-color="#b0c4de" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="300">Gym (300)</button>
+                    
+                    <!-- Core Buildings -->
+                    <!-- Construction Yard (cy) removed from control panel -->
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="building" data-symbol-id="power_plant" data-width="25" data-height="28" data-color="#4a5d3f" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="400">Power Plant (400)</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="building" data-symbol-id="barracks" data-width="20" data-height="20" data-color="#4a5d3f" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="300">Barracks (300)</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="building" data-symbol-id="refinery" data-width="25" data-height="25" data-color="#4b5320" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="500" data-max-fuel="1000">Refinery (500)</button>
+
+                    <!-- Defense & Infrastructure Buildings -->
+                    <!-- Defense Tower removed from control panel -->
+                    <button class="game-button spawn-button bg-red-600" data-entity-type="building" data-symbol-id="turret" data-width="18" data-height="18" data-color="#4a5d3f" data-team="friendly_military" data-hp="100" data-damage="5" data-range="150" data-cooldown="1" data-price="350">Turret (350)</button>
+                    
+                    <!-- Wall segments with specific rotations via data-rotation -->
+                    <button class="game-button spawn-button bg-red-600" data-entity-type="building" data-symbol-id="wall_segment" data-width="30" data-height="8" data-color="#333333" data-team="friendly_building" data-hp="200" data-damage="0" data-range="0" data-cooldown="0" data-rotation="0" data-price="50">Wall (0° / 50)</button>
+                    <button class="game-button spawn-button bg-red-600" data-entity-type="building" data-symbol-id="wall_segment_45" data-width="30" data-height="8" data-color="#333333" data-team="friendly_building" data-hp="200" data-damage="0" data-range="0" data-cooldown="0" data-rotation="0.785" data-price="50">Wall (45° / 50)</button>
+                    <!-- data-rotation removed for 90-degree wall as it now uses a dedicated vertical SVG -->
+                    <button class="game-button spawn-button bg-red-600" data-entity-type="building" data-symbol-id="wall_segment_90" data-width="8" data-height="30" data-color="#333333" data-team="friendly_building" data-hp="200" data-damage="0" data-range="0" data-cooldown="0" data-price="50">Wall (90° / 50)</button>
+                    <button class="game-button spawn-button bg-red-600" data-entity-type="building" data-symbol-id="wall_segment_135" data-width="30" data-height="8" data-color="#333333" data-team="friendly_building" data-hp="200" data-damage="0" data-range="0" data-cooldown="0" data-rotation="2.355" data-price="50">Wall (135° / 50)</button>
+                    
+                    <button class="game-button spawn-button bg-red-600" data-entity-type="building" data-symbol-id="bunker" data-width="20" data-height="20" data-color="#555" data-team="friendly_building" data-hp="150" data-damage="0" data-range="0" data-cooldown="0" data-price="300">Bunker (300)</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="building" data-symbol-id="helipad" data-width="30" data-height="30" data-color="#555555" data-team="friendly_building" data-hp="100" data-damage="0" data-range="0" data-cooldown="0" data-price="400">Helipad (400)</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="control-group" id="militaryUnitsGroup">
+            <div class="control-header collapsed" data-target="militaryUnitsContent">
+                <h3>Military Units</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="militaryUnitsContent" class="control-content collapsed">
+                <div class="grid grid-cols-2 gap-3">
+                    <!-- Data attributes added for Engineer/Medic for game logic -->
+                    <button class="game-button spawn-button bg-green-600" data-entity-type="unit" data-symbol-id="rifleman" data-width="8" data-height="8" data-speed="10" data-color="#6B8E23" data-team="friendly_military" data-hp="10" data-damage="3" data-range="120" data-cooldown="1" data-price="50">Rifleman (50)</button>
+                    <button class="game-button spawn-button bg-green-600" data-entity-type="unit" data-symbol-id="rocket_trooper" data-width="8" data-height="8" data-speed="10" data-color="#6B8E23" data-team="friendly_military" data-hp="10" data-damage="8" data-range="150" data-cooldown="3" data-price="150">Rocket Trooper (150)</button>
+                    <button class="game-button spawn-button bg-green-600" data-entity-type="unit" data-symbol-id="engineer" data-width="8" data-height="8" data-speed="10" data-color="#6B8E23" data-team="friendly_military" data-hp="10" data-damage="1" data-range="50" data-cooldown="1" data-price="100" data-is-engineer="true" data-max-fuel="100" data-fuel-rate="0">Engineer (100)</button>
+                    <button class="game-button spawn-button bg-green-600" data-entity-type="unit" data-symbol-id="medic" data-width="8" data-height="8" data-speed="10" data-color="#6B8E23" data-team="friendly_military" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="100" data-is-medic="true">Medic (100)</button>
+                    <button class="game-button spawn-button bg-green-600" data-entity-type="unit" data-symbol-id="grenadier" data-width="8" data-height="8" data-speed="10" data-color="#6B8E23" data-team="friendly_military" data-hp="10" data-damage="5" data-range="80" data-cooldown="1" data-price="75">Grenadier (75)</button>
+                    <!-- PILOT BUTTON MOVED HERE -->
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="unit" data-symbol-id="pilot" data-width="8" data-height="8" data-speed="5" data-color="#a9a9a9" data-team="friendly_civilian" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="75">Pilot (75)</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="control-group" id="vehiclesGroup">
+            <div class="control-header collapsed" data-target="vehiclesContent">
+                <h3>Vehicles</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="vehiclesContent" class="control-content collapsed">
+                <div class="grid grid-cols-2 gap-3">
+                    <!-- Vehicle data attributes updated for fuel and capacity -->
+                    <button class="game-button spawn-button bg-green-600" data-entity-type="unit" data-symbol-id="jeep" data-width="12" data-height="18" data-speed="40" data-color="#6B8E23" data-team="friendly_military" data-hp="20" data-damage="3" data-range="100" data-cooldown="1" data-price="200" data-max-fuel="1000" data-fuel-rate="0.25">Jeep (200)</button>
+                    <button class="game-button spawn-button bg-green-600" data-entity-type="unit" data-symbol-id="apc" data-width="15" data-height="22" data-speed="40" data-color="#6B8E23" data-team="friendly_military" data-hp="30" data-damage="2" data-range="80" data-cooldown="1.5" data-price="300" data-max-fuel="1000" data-fuel-rate="0.40" data-capacity="5">APC (300)</button>
+                    <button class="game-button spawn-button bg-green-600" data-entity-type="unit" data-symbol-id="tank" data-width="20" data-height="20" data-speed="40" data-color="#556B2F" data-team="friendly_military" data-hp="50" data-damage="10" data-range="180" data-cooldown="2" data-price="600" data-max-fuel="1500" data-fuel-rate="0.50">Tank (600)</button>
+                    <button class="game-button spawn-button bg-green-600" data-entity-type="unit" data-symbol-id="helicopter" data-width="25" data-height="25" data-speed="90" data-color="#6B8E23" data-team="friendly_military" data-hp="25" data-damage="7" data-range="200" data-cooldown="1" data-price="500" data-max-fuel="2000" data-fuel-rate="0.80">Attack Chopper (500)</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="control-group" id="wildlifeLivestockGroup">
+            <div class="control-header collapsed" data-target="wildlifeLivestockContent">
+                <h3>Wildlife & Livestock (Free)</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="wildlifeLivestockContent" class="control-content collapsed">
+                <div class="grid grid-cols-2 gap-3">
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="unit" data-symbol-id="bear" data-width="15" data-height="15" data-speed="10" data-color="#8B4513" data-team="neutral_animal" data-hp="15" data-damage="0" data-range="0" data-cooldown="0" data-price="0">Bear (0)</button>
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="unit" data-symbol-id="stag" data-width="10" data-height="15" data-speed="20" data-color="#a0522d" data-team="neutral_animal" data-hp="10" data-damage="0" data-range="0" data-cooldown="0" data-price="0">Stag (0)</button>
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="unit" data-symbol-id="cat" data-width="8" data-height="8" data-speed="15" data-color="#7f8c8d" data-team="neutral_animal" data-hp="5" data-damage="0" data-range="0" data-cooldown="0" data-price="0">Cat (0)</button>
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="unit" data-symbol-id="cow" data-width="20" data-height="25" data-speed="5" data-color="#f0f0f0" data-team="neutral_animal" data-hp="20" data-damage="0" data-range="0" data-cooldown="0" data-price="0">Cow (0)</button>
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="unit" data-symbol-id="pig" data-width="10" data-height="10" data-speed="15" data-color="#ffc0cb" data-team="neutral_animal" data-hp="8" data-damage="0" data-range="0" data-cooldown="0" data-price="0">Pig (0)</button>
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="unit" data-symbol-id="chicken" data-width="5" data-height="5" data-speed="10" data-color="#f0f8ff" data-team="neutral_animal" data-hp="3" data-damage="0" data-range="0" data-cooldown="0" data-price="0">Chicken (0)</button>
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="unit" data-symbol-id="rabbit-b" data-width="5" data-height="5" data-speed="25" data-color="#8b4513" data-team="neutral_animal" data-hp="3" data-damage="0" data-range="0" data-cooldown="0" data-price="0">Rabbit (Brown) (0)</button>
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="unit" data-symbol-id="rabbit-w" data-width="5" data-height="5" data-speed="25" data-color="#b0c4de" data-team="neutral_animal" data-hp="3" data-damage="0" data-range="0" data-cooldown="0" data-price="0">Rabbit (White) (0)</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="control-group" id="terrainObstaclesGroup">
+            <div class="control-header collapsed" data-target="terrainObstaclesContent">
+                <h3>Terrain & Natural Obstacles (Free)</h3>
+                <svg class="collapse-icon">
+                    <use xlink:href="#chevron-down-icon"></use>
+                </svg>
+            </div>
+            <div id="terrainObstaclesContent" class="control-content collapsed">
+                <div class="grid grid-cols-2 gap-3">
+                    <!-- Trees (Impassable Obstacles) -->
+                    <button class="game-button spawn-button bg-teal-600" data-entity-type="terrain" data-symbol-id="tree_birch" data-width="20" data-height="20" data-team="neutral" data-price="0">Birch Tree</button>
+                    <button class="game-button spawn-button bg-teal-600" data-entity-type="terrain" data-symbol-id="tree_maple" data-width="25" data-height="25" data-team="neutral" data-price="0">Maple Tree</button>
+                    <button class="game-button spawn-button bg-teal-600" data-entity-type="terrain" data-symbol-id="tree_spruce" data-width="18" data-height="18" data-team="neutral" data-price="0">Spruce Tree</button>
+                    <button class="game-button spawn-button bg-teal-600" data-entity-type="terrain" data-symbol-id="tree_oak" data-width="22" data-height="22" data-team="neutral" data-price="0">Oak Tree</button>
+                    
+                    <!-- Rocks (Impassable Obstacles) -->
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="terrain" data-symbol-id="rock_medium" data-width="15" data-height="15" data-team="neutral" data-price="0">Rock</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="terrain" data-symbol-id="rock_cluster" data-width="25" data-height="25" data-team="neutral" data-price="0">Rock Cluster</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="terrain" data-symbol-id="rock_hazard" data-width="30" data-height="30" data-team="neutral" data-price="0">Rock Hazard</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="terrain" data-symbol-id="rock_cluster_elongated" data-width="35" data-height="15" data-team="neutral" data-price="0">Long Rock</button>
+                    <!-- NEW ROCKS ADDED -->
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="terrain" data-symbol-id="rock_small" data-width="10" data-height="10" data-team="neutral" data-price="0">Small Rock</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="terrain" data-symbol-id="rock_tiny" data-width="5" data-height="5" data-team="neutral" data-price="0">Tiny Rock</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="terrain" data-symbol-id="rock_cluster_scattered" data-width="20" data-height="20" data-team="neutral" data-price="0">Scattered Rocks</button>
+
+                    <!-- Fields (Passable Decorations/Resources) -->
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="terrain" data-symbol-id="sunflower_field" data-width="20" data-height="20" data-team="neutral" data-price="0">Sunflower Field</button>
+                    <button class="game-button spawn-button bg-pink-600" data-entity-type="terrain" data-symbol-id="flowerfield_red" data-width="20" data-height="20" data-team="neutral" data-price="0">Flower Field (Red)</button>
+                    <button class="game-button spawn-button bg-purple-600" data-entity-type="terrain" data-symbol-id="flowerfield_purple" data-width="20" data-height="20" data-team="neutral" data-price="0">Flower Field (Purple)</button>
+                    <button class="game-button spawn-button bg-sky-600" data-entity-type="terrain" data-symbol-id="flowerfield_blue" data-width="20" data-height="20" data-team="neutral" data-price="0">Flower Field (Blue)</button>
+                    <!-- NEW FIELDS/FLOWERS ADDED -->
+                    <button class="game-button spawn-button bg-amber-600" data-entity-type="terrain" data-symbol-id="flowerfield_yellow" data-width="20" data-height="20" data-team="neutral" data-price="0">Flower Field (Yellow)</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="terrain" data-symbol-id="flowerfield_white" data-width="20" data-height="20" data-team="neutral" data-price="0">Flower Field (White)</button>
+                    <button class="game-button spawn-button bg-gray-600" data-entity-type="terrain" data-symbol-id="daisy_field" data-width="20" data-height="20" data-team="neutral" data-price="0">Daisy Field</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Canvas takes the remaining width and full height -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Map Generator Modal -->
+    <div id="mapGenModal">
+        <div id="mapGenWindow">
+            <button id="closeMapGenModal" title="Close Map Generator">&times;</button>
+            <iframe id="mapGenIframe" src="mapgen.html" title="Map Generator"></iframe>
+        </div>
+    </div>
+    <!-- END Map Generator Modal -->
+
+    <!-- Placeholder for dynamically injected SVG Definitions -->
+    <div id="svgDefinitionsContainer" class="hidden-svg-definitions">
+        <!-- SVG for the collapse icon -->
+        <svg id="chevron-down-icon" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" fill-rule="evenodd"/>
+        </svg>
+    </div>
+
+    <!-- Load the game logic -->
+    <script src="game.js"></script>
+    
+    <!-- NEW: Collapsible menu logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const headers = document.querySelectorAll('.control-header');
+
+            headers.forEach(header => {
+                header.addEventListener('click', function() {
+                    const targetId = this.getAttribute('data-target');
+                    const content = document.getElementById(targetId);
+
+                    this.classList.toggle('collapsed');
+                    content.classList.toggle('collapsed');
+                });
+            });
+        });
+    </script>
+</body>
+</html>
