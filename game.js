@@ -1,3 +1,4 @@
+
 // game.js
 
 (function() {
@@ -642,6 +643,7 @@
                         civilianCoins: entity.civilianCoins || 0, 
                         assignedWorkBuildingId: entity.assignedWorkBuildingId || null,
                         civilianHealth: entity.civilianHealth || CIVILIAN_START_HEALTH,
+                        hasEaten: entity.hasEaten || false,
                         ejectionLockoutTimer: entity.ejectionLockoutTimer || 0, // NEW
                         // NEW VEHICLE/ENGINEER/MEDIC/APC PROPERTIES
                         maxFuel: entity.maxFuel || 0,
@@ -728,6 +730,7 @@
                         civilianCoins: entityData.civilianCoins || 0,
                         assignedWorkBuildingId: entityData.assignedWorkBuildingId || null,
                         civilianHealth: entityData.civilianHealth || CIVILIAN_START_HEALTH,
+                        hasEaten: entityData.hasEaten || false,
                         ejectionLockoutTimer: entityData.ejectionLockoutTimer || 0, // NEW
                         // NEW VEHICLE/ENGINEER/MEDIC/APC PROPERTIES
                         maxFuel: entityData.maxFuel || 0,
@@ -1745,6 +1748,40 @@
                     attackMessageLifetime = ATTACK_MESSAGE_DURATION_FRAMES;
                 }
             }
+
+            // MODIFICATION: Building Trash Evacuation Logic
+            gameEntities.forEach(building => {
+                if (building.type === 'building' && building.maxTrash > 0 && building.currentTrash >= building.maxTrash) {
+                    // Building is full, find and evacuate any non-cleaner civilians inside.
+                    gameEntities.forEach(civilian => {
+                        if (civilian.isCivilian && civilian.symbolId !== 'cleaner') {
+                            const distanceSq = (civilian.x - building.x)**2 + (civilian.y - building.y)**2;
+                            // A civilian is "at" a building if they are close and not currently moving to a different target.
+                            const isInside = distanceSq < (building.width / 2)**2;
+                            const isIdleAtBuilding = civilian.waitTimer > 0;
+
+                            if (isInside && isIdleAtBuilding) {
+                                // Evacuate the civilian
+                                attackMessage = `${civilian.symbolId} evacuated from ${building.symbolId} due to trash!`;
+                                attackMessageLifetime = 120;
+
+                                civilian.waitTimer = 0;
+                                civilian.targetEntityId = null; // Clear any lingering target
+                                
+                                // Advance route to prevent immediate re-entry attempt
+                                if (civilian.routeIndex !== -1 && civilian.routeIndex !== -2 && civilian.route.length > 0) {
+                                    civilian.routeIndex = (civilian.routeIndex + 1) % civilian.route.length;
+                                }
+
+                                // Clear assigned work building if it's the one they were evacuated from
+                                if (civilian.assignedWorkBuildingId === building.id) {
+                                    civilian.assignedWorkBuildingId = null;
+                                }
+                            }
+                        }
+                    });
+                }
+            });
             
             // NEW: Update civilian panic mode (Copied from previous full game.js)
             const enemiesExist = gameEntities.some(e => e.team === 'enemy' && e.hp > 0);
@@ -2095,24 +2132,30 @@
                     } 
                     
                     if (entity.civilianHealth < CIVILIAN_START_HEALTH) {
-                        if (isAtHospital && entity.routeIndex === -2) { 
-                            entity.waitTimer = 1; 
-                            entity.civilianHealth = Math.min(CIVILIAN_START_HEALTH, entity.civilianHealth + CIVILIAN_HOSPITAL_HEAL_RATE * dt);
-                            if (entity.civilianHealth === CIVILIAN_START_HEALTH) {
-                                entity.waitTimer = 0; 
-                                entity.routeIndex = -1; 
-                                entity.targetEntityId = null; 
-                                attackMessage = `${entity.symbolId} fully healed at Hospital!`;
+                        if (isAtHospital && entity.routeIndex === -2) {
+                            entity.waitTimer = 1;
+                            if (entity.hasEaten) {
+                                entity.civilianHealth = Math.min(CIVILIAN_START_HEALTH, entity.civilianHealth + CIVILIAN_HOSPITAL_HEAL_RATE * dt);
+                                if (entity.civilianHealth === CIVILIAN_START_HEALTH) {
+                                    entity.waitTimer = 0;
+                                    entity.routeIndex = -1;
+                                    entity.targetEntityId = null;
+                                    attackMessage = `${entity.symbolId} fully healed at Hospital!`;
+                                    attackMessageLifetime = 60;
+                                }
+                            } else if (entity.coinCooldown <= 0) {
+                                attackMessage = `${entity.symbolId} cannot heal without visiting the grocery store first.`;
                                 attackMessageLifetime = 60;
+                                entity.coinCooldown = CIVILIAN_REWARD_COOLDOWN * 2; // Prevent message spam
                             }
-                            return; 
-                        } 
+                            return;
+                        }
                         
                         const isSkyscraperInRoute = entity.route.includes('skyscraper');
                         const canRestAtSkyscraper = isAtSkyscraper && isSkyscraperInRoute;
 
                         // NEW: Pilot rest logic combined with Skyscraper logic
-                        if (canRestAtSkyscraper || isPilotAtBarracks) {
+                        if ((canRestAtSkyscraper || isPilotAtBarracks) && entity.hasEaten) {
                             entity.civilianHealth = Math.min(CIVILIAN_START_HEALTH, entity.civilianHealth + CIVILIAN_REST_HEAL_RATE * dt);
                             if (entity.civilianHealth < CIVILIAN_START_HEALTH) {
                                 entity.waitTimer = Math.max(entity.waitTimer, 1); 
@@ -2170,55 +2213,64 @@
                                     }
                                 } else if (currentBuildingSymbolId === 'refinery' && refineryBuilding && Math.abs(refineryBuilding.x - entity.x) < 1) {
                                     // Chef arrived at Refinery to unload raw material (fuel it)
-                                    
-                                    // CHECK: Power Plant Dependency
-                                    if (!powerPlantBuilding || powerPlantBuilding.currentPower <= 0) {
-                                        attackMessage = `Refinery is offline. Power Plant is out of power!`;
-                                        attackMessageLifetime = 60;
-                                        entity.waitTimer = 0;
-                                        // The chef should immediately proceed to the next stop if power is out
-                                        if (entity.routeIndex !== -1 && entity.routeIndex !== -2 && entity.route.length > 0) {
-                                            entity.routeIndex = (entity.routeIndex + 1) % entity.route.length; 
+
+                                    if (refineryBuilding.currentTrash >= refineryBuilding.maxTrash) {
+                                        if (entity.coinCooldown <= 0) {
+                                            attackMessage = `Refinery is full of trash! Work stopped.`;
+                                            attackMessageLifetime = 60;
+                                            entity.coinCooldown = CIVILIAN_REWARD_COOLDOWN;
                                         }
-                                        entity.waitTimer = CIVILIAN_WAIT_DURATION; 
-                                        entity.targetEntityId = null; 
-                                        entity.targetX = undefined; 
-                                        entity.targetY = undefined; 
-                                        return; 
-                                    }
-                                    // END NEW CHECK
-                                    
-                                    const fuelToUnload = entity.currentRawMaterial;
-                                    if (fuelToUnload > 0) {
-                                        const fuelNeeded = refineryBuilding.maxFuel - refineryBuilding.currentFuel;
-                                        const transferAmount = Math.min(RAW_MATERIAL_LOAD_RATE * dt, fuelToUnload, fuelNeeded);
-                                        
-                                        if (transferAmount > 0) {
-                                            entity.currentRawMaterial -= transferAmount;
-                                            refineryBuilding.currentFuel += transferAmount;
-                                            entity.waitTimer = Math.max(entity.waitTimer, 1); // Keep waiting while unloading
-
-                                            // Only pay salary on successful material transfer completion (after work cooldown)
-                                            if (entity.coinCooldown <= 0) {
-                                                if (entity.civilianHealth >= CIVILIAN_MIN_WORK_HEALTH) {
-                                                    const salary = currentEconomicLogic['chef'].work.salary;
-                                                    const taxAmount = Math.floor(salary * incomeTaxRate / 100);
-                                                    const netSalary = salary - taxAmount;
-
-                                                    entity.civilianCoins += netSalary;
-                                                    playerCoins += taxAmount;
-                                                    
-                                                    entity.civilianHealth = Math.max(0, entity.civilianHealth - CIVILIAN_WORK_HEALTH_LOSS);
-                                                    
-                                                    entity.coinCooldown = CIVILIAN_REWARD_COOLDOWN; 
-                                                    attackMessage = `+${netSalary} ($${taxAmount} Tax) at Refinery`;
-                                                    updateCoinDisplay();
-                                                } else {
-                                                    attackMessage = `Health too low (${entity.civilianHealth.toFixed(0)}%) to work at Refinery`;
-                                                    entity.coinCooldown = CIVILIAN_REWARD_COOLDOWN; 
-                                                }
+                                    } else {
+                                        // CHECK: Power Plant Dependency
+                                        if (!powerPlantBuilding || powerPlantBuilding.currentPower <= 0) {
+                                            attackMessage = `Refinery is offline. Power Plant is out of power!`;
+                                            attackMessageLifetime = 60;
+                                            entity.waitTimer = 0;
+                                            // The chef should immediately proceed to the next stop if power is out
+                                            if (entity.routeIndex !== -1 && entity.routeIndex !== -2 && entity.route.length > 0) {
+                                                entity.routeIndex = (entity.routeIndex + 1) % entity.route.length;
                                             }
-                                            return; 
+                                            entity.waitTimer = CIVILIAN_WAIT_DURATION;
+                                            entity.targetEntityId = null;
+                                            entity.targetX = undefined;
+                                            entity.targetY = undefined;
+                                            return;
+                                        }
+                                        // END NEW CHECK
+
+                                        const fuelToUnload = entity.currentRawMaterial;
+                                        if (fuelToUnload > 0) {
+                                            const fuelNeeded = refineryBuilding.maxFuel - refineryBuilding.currentFuel;
+                                            const transferAmount = Math.min(RAW_MATERIAL_LOAD_RATE * dt, fuelToUnload, fuelNeeded);
+
+                                            if (transferAmount > 0) {
+                                                entity.currentRawMaterial -= transferAmount;
+                                                refineryBuilding.currentFuel += transferAmount;
+                                                entity.waitTimer = Math.max(entity.waitTimer, 1); // Keep waiting while unloading
+
+                                                // Only pay salary on successful material transfer completion (after work cooldown)
+                                                if (entity.coinCooldown <= 0) {
+                                                    if (entity.civilianHealth >= CIVILIAN_MIN_WORK_HEALTH) {
+                                                        const salary = currentEconomicLogic['chef'].work.salary;
+                                                        const taxAmount = Math.floor(salary * incomeTaxRate / 100);
+                                                        const netSalary = salary - taxAmount;
+
+                                                        entity.civilianCoins += netSalary;
+                                                        playerCoins += taxAmount;
+
+                                                        entity.civilianHealth = Math.max(0, entity.civilianHealth - CIVILIAN_WORK_HEALTH_LOSS);
+                                                        entity.hasEaten = false;
+                                                        
+                                                        entity.coinCooldown = CIVILIAN_REWARD_COOLDOWN;
+                                                        attackMessage = `+${netSalary} ($${taxAmount} Tax) at Refinery`;
+                                                        updateCoinDisplay();
+                                                    } else {
+                                                        attackMessage = `Health too low (${entity.civilianHealth.toFixed(0)}%) to work at Refinery`;
+                                                        entity.coinCooldown = CIVILIAN_REWARD_COOLDOWN;
+                                                    }
+                                                }
+                                                return;
+                                            }
                                         }
                                     }
                                     entity.waitTimer = 0; // Nothing to unload/refinery full
@@ -2280,7 +2332,8 @@
                                                     playerCoins += taxAmount;
                                                     
                                                     entity.civilianHealth = Math.max(0, entity.civilianHealth - CIVILIAN_WORK_HEALTH_LOSS);
-                                                    
+                                                    entity.hasEaten = false;
+
                                                     entity.coinCooldown = CIVILIAN_REWARD_COOLDOWN; 
                                                     attackMessage = `+${netSalary} ($${taxAmount} Tax) at Power Plant`;
                                                     updateCoinDisplay();
@@ -2315,8 +2368,10 @@
 
                                 // 1. WORK/SALARY LOGIC (Standard, excludes Chef and Cleaner)
                                 if (entity.symbolId !== 'chef' && entity.symbolId !== 'cleaner' && transactionLogic.work && transactionLogic.work.buildingId === currentBuildingSymbolId) {
-                                    if (entity.civilianHealth >= CIVILIAN_MIN_WORK_HEALTH) {
-                                        
+                                    if (currentBuilding && currentBuilding.maxTrash > 0 && currentBuilding.currentTrash >= currentBuilding.maxTrash) {
+                                        rewardMessage = `${currentBuilding.symbolId} is full of trash! Work stopped.`;
+                                        rewarded = true;
+                                    } else if (entity.civilianHealth >= CIVILIAN_MIN_WORK_HEALTH) {
                                         // Use adjusted salary from currentEconomicLogic
                                         const salary = transactionLogic.work.salary;
                                         const taxAmount = Math.floor(salary * incomeTaxRate / 100);
@@ -2326,8 +2381,8 @@
                                         playerCoins += taxAmount;
                                         
                                         entity.civilianHealth = Math.max(0, entity.civilianHealth - CIVILIAN_WORK_HEALTH_LOSS);
+                                        entity.hasEaten = false;
                                         
-                                        entity.coinCooldown = CIVILIAN_REWARD_COOLDOWN; 
                                         rewardMessage = `+${netSalary} ($${taxAmount} Tax) at ${currentBuildingSymbolId}`;
                                         rewarded = true;
                                         updateCoinDisplay();
@@ -2335,6 +2390,7 @@
                                         rewardMessage = `Health too low (${entity.civilianHealth.toFixed(0)}%) to work at ${currentBuildingSymbolId}`;
                                         rewarded = true; 
                                     }
+                                    entity.coinCooldown = CIVILIAN_REWARD_COOLDOWN;
                                 }
 
                                 // 2. SPEND/VAT LOGIC
@@ -2368,6 +2424,10 @@
                                         if (entity.civilianCoins >= cost) {
                                             entity.civilianCoins -= cost;
                                             
+                                            if (currentBuildingSymbolId === 'grocery_store') {
+                                                entity.hasEaten = true;
+                                            }
+
                                             if (spendItem.vat) {
                                                 const vatAmount = Math.ceil(cost * vatRate / 100);
                                                 playerCoins += vatAmount;
@@ -2510,38 +2570,52 @@
                                     if (entity.assignedWorkBuildingId) {
                                         const assignedBuilding = gameEntities.find(e => e.id === entity.assignedWorkBuildingId && e.hp > 0);
                                         if (assignedBuilding) {
-                                            nextTargetBuilding = assignedBuilding;
-                                            entity.routeIndex = nextIndex; 
-                                            break;
+                                            // MODIFICATION: Check if assigned building is full of trash
+                                            if (entity.symbolId !== 'cleaner' && assignedBuilding.maxTrash > 0 && assignedBuilding.currentTrash >= assignedBuilding.maxTrash) {
+                                                entity.assignedWorkBuildingId = null; // Unassign and try to find a new one
+                                            } else {
+                                                nextTargetBuilding = assignedBuilding;
+                                                entity.routeIndex = nextIndex; 
+                                                break;
+                                            }
                                         } else {
                                             entity.assignedWorkBuildingId = null;
                                         }
                                     }
                                     
-                                    const availableBuildings = getAvailableWorkBuildings(nextBuildingSymbolId, entity.symbolId);
-                                    if (availableBuildings.length > 0) {
-                                        let nearestAvailable = availableBuildings.reduce((nearest, building) => {
-                                            const distSq = (building.x - entity.x)**2 + (building.y - entity.y)**2;
-                                            if (distSq < nearest.distSq) {
-                                                return { building: building, distSq: distSq };
-                                            }
-                                            return nearest;
-                                        }, { building: null, distSq: Infinity });
+                                    if (!nextTargetBuilding) {
+                                        const allBuildings = getAvailableWorkBuildings(nextBuildingSymbolId, entity.symbolId);
+                                        // MODIFICATION: Filter out buildings that are full of trash for non-cleaners
+                                        const availableBuildings = entity.symbolId === 'cleaner' ? allBuildings : allBuildings.filter(b => b.maxTrash === 0 || b.currentTrash < b.maxTrash);
 
-                                        if (nearestAvailable.building) {
-                                            entity.assignedWorkBuildingId = nearestAvailable.building.id;
-                                            nextTargetBuilding = nearestAvailable.building;
+                                        if (availableBuildings.length > 0) {
+                                            let nearestAvailable = availableBuildings.reduce((nearest, building) => {
+                                                const distSq = (building.x - entity.x)**2 + (building.y - entity.y)**2;
+                                                if (distSq < nearest.distSq) {
+                                                    return { building: building, distSq: distSq };
+                                                }
+                                                return nearest;
+                                            }, { building: null, distSq: Infinity });
+
+                                            if (nearestAvailable.building) {
+                                                entity.assignedWorkBuildingId = nearestAvailable.building.id;
+                                                nextTargetBuilding = nearestAvailable.building;
+                                                entity.routeIndex = nextIndex; 
+                                                break;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    const potentialBuilding = getBuildingBySymbolId(nextBuildingSymbolId);
+                                    if (potentialBuilding) {
+                                        // MODIFICATION: Check if building is full of trash before setting it as a target
+                                        if (entity.symbolId !== 'cleaner' && potentialBuilding.maxTrash > 0 && potentialBuilding.currentTrash >= potentialBuilding.maxTrash) {
+                                            // Building is full, skip it and let the loop continue
+                                        } else {
+                                            nextTargetBuilding = potentialBuilding;
                                             entity.routeIndex = nextIndex; 
                                             break;
                                         }
-                                    } 
-                                    
-                                } else {
-                                    nextTargetBuilding = getBuildingBySymbolId(nextBuildingSymbolId);
-                                    
-                                    if (nextTargetBuilding) {
-                                        entity.routeIndex = nextIndex; 
-                                        break;
                                     }
                                 }
                             }
@@ -2721,6 +2795,7 @@
                                         isCivilian: entity.isCivilian,
                                         civilianCoins: entity.civilianCoins,
                                         civilianHealth: entity.civilianHealth,
+                                        hasEaten: entity.hasEaten,
                                         // Keep other properties if they are needed for save/load of the unit's state when inside APC
                                     };
                                     
@@ -3291,6 +3366,7 @@
                     civilianCoins: currentSpawnConfig.civilianCoins || 0,
                     assignedWorkBuildingId: currentSpawnConfig.assignedWorkBuildingId || null,
                     civilianHealth: currentSpawnConfig.civilianHealth || CIVILIAN_START_HEALTH,
+                    hasEaten: currentSpawnConfig.hasEaten || false,
                     ejectionLockoutTimer: currentSpawnConfig.ejectionLockoutTimer || 0, // NEW
                     // NEW VEHICLE/ENGINEER/MEDIC/APC PROPERTIES
                     maxFuel: currentSpawnConfig.maxFuel || 0,
@@ -3904,6 +3980,7 @@
                         currentSpawnConfig.civilianCoins = CIVILIAN_START_COINS;
                         currentSpawnConfig.assignedWorkBuildingId = null;
                         currentSpawnConfig.civilianHealth = CIVILIAN_START_HEALTH;
+                        currentSpawnConfig.hasEaten = false;
                     }
 
                     body.classList.add('placement-mode');
